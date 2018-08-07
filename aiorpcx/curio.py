@@ -67,7 +67,15 @@ async def spawn(coro, *args, loop=None, report_crash=True):
 def spawn_sync(coro, *args, loop=None, report_crash=True):
     coro = normalize_corofunc(coro, args)
     loop = loop or get_event_loop()
-    task = loop.create_task(coro)
+    async def f():
+        try:
+            return await coro
+        except:
+            import traceback
+            traceback.print_exc()
+            raise
+    f = normalize_corofunc(f, ())
+    task = loop.create_task(f)
     if report_crash:
         task.add_done_callback(partial(check_task, logging))
     return task
