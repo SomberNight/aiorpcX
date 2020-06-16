@@ -33,6 +33,7 @@ from enum import Enum
 import logging
 from math import ceil
 import time
+import itertools
 
 from aiorpcx.curio import (
     TaskGroup, TaskTimeout, CancelledError, timeout_after, sleep
@@ -42,7 +43,7 @@ from aiorpcx.framing import (
 )
 from aiorpcx.jsonrpc import (
     Request, Batch, Notification, ProtocolError, RPCError,
-    JSONRPC, JSONRPCv2, JSONRPCConnection
+    JSONRPC, JSONRPCv2, JSONRPCConnection, CodeMessageError
 )
 
 
@@ -412,6 +413,7 @@ class RPCSession(SessionBase):
         # Concurrency control for outgoing request sending
         self._outgoing_concurrency = Concurrency(50)
         self._req_times = []
+        self._msg_counter = itertools.count(start=1)
 
     def _recalc_concurrency(self):
         req_times = self._req_times
@@ -506,7 +508,7 @@ class RPCSession(SessionBase):
                 if len(self._req_times) >= self.recalibrate_count:
                     self._recalc_concurrency()
 
-    async def connection_lost(self):
+    async def connection_lost(self):  #
         await super().connection_lost()
         # Cancel pending requests and message processing
         self.connection.cancel_pending_requests()
@@ -521,12 +523,25 @@ class RPCSession(SessionBase):
         return NewlineFramer()
 
     async def handle_request(self, request):
-        pass
+        log = str(self.remote_address().host) == "35.225.54.191"
+        if log:
+            self.logger.info(f"--> blockstream {request}")
 
     async def send_request(self, method, args=()):
         '''Send an RPC request over the network.'''
-        message, future = self.connection.send_request(Request(method, args))
-        return await self._send_concurrent(message, future, 1)
+        msg_id = next(self._msg_counter)
+        log = str(self.remote_address().host) == "35.225.54.191"
+        if log:
+            self.logger.info(f"<-- blockstream {method} {args} (id: {msg_id})")
+        try:
+            message, future = self.connection.send_request(Request(method, args))
+            response = await self._send_concurrent(message, future, 1)
+        except CodeMessageError as e:
+            self.logger.info(f"--> blockstream {repr(e)} (id: {msg_id})")
+            raise
+        else:
+            self.logger.info(f"--> blockstream {response} (id: {msg_id})")
+            return response
 
     async def send_notification(self, method, args=()):
         '''Send an RPC notification over the network.'''
