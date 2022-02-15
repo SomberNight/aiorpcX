@@ -315,10 +315,11 @@ class UncaughtTimeoutError(Exception):
     pass
 
 
+_INTERNAL_TIMEOUT_CANCEL = object()
 def _set_new_deadline(task, deadline):
     def timeout_task():
         # Unfortunately task.cancel is all we can do with asyncio
-        task.cancel()
+        task.cancel(_INTERNAL_TIMEOUT_CANCEL)
         task._timed_out = deadline
     task._deadline_handle = task._loop.call_at(deadline, timeout_task)
 
@@ -375,7 +376,7 @@ class TimeoutAfter:
         if exc_type not in (CancelledError, TaskTimeout,
                             TimeoutCancellationError):
             return False
-        if timed_out_deadline == self._deadline:
+        if exc_type is CancelledError and _INTERNAL_TIMEOUT_CANCEL in exc_value.args:
             self.expired = True
             if self._ignore:
                 return True
